@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8" />
-<title>文件簽署框設定（多框＋註解）</title>
+<title>文件簽署框設定（進階）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
 <style>
@@ -29,6 +29,7 @@ h2 { margin-top: 0; }
   position: relative;
   border: 1px solid #d1d5db;
   margin-top: 12px;
+  user-select: none;
 }
 
 #pdfCanvas {
@@ -39,18 +40,26 @@ h2 { margin-top: 0; }
   position: absolute;
   border: 2px dashed #2563eb;
   background: rgba(37,99,235,0.15);
-  cursor: pointer;
+  box-sizing: border-box;
+}
+
+.preview-box {
+  position: absolute;
+  border: 2px dashed #facc15;
+  background: rgba(250,204,21,0.25);
+  pointer-events: none;
+  z-index: 10;
 }
 
 .field-box span {
   position: absolute;
-  top: -20px;
+  top: -22px;
   left: 0;
   background: #2563eb;
   color: #fff;
   font-size: 12px;
-  padding: 2px 6px;
-  border-radius: 6px;
+  padding: 2px 8px;
+  border-radius: 999px;
   white-space: nowrap;
 }
 
@@ -73,23 +82,6 @@ button {
 
 button.secondary { background: #6b7280; }
 button.danger { background: #dc2626; }
-
-input, select {
-  padding: 6px 8px;
-  font-size: 14px;
-}
-
-.field-list {
-  margin-top: 12px;
-}
-
-.field-item {
-  display: flex;
-  gap: 6px;
-  align-items: center;
-  margin-bottom: 6px;
-  font-size: 13px;
-}
 
 pre {
   background: #f3f4f6;
@@ -115,9 +107,8 @@ pre {
 
   <div id="pdfWrap">
     <canvas id="pdfCanvas"></canvas>
+    <div id="previewBox" class="preview-box" style="display:none;"></div>
   </div>
-
-  <div class="field-list" id="fieldList"></div>
 
   <h3>📦 輸出結果</h3>
   <pre id="output">{ 尚未設定 }</pre>
@@ -131,14 +122,14 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 const canvas = document.getElementById("pdfCanvas");
 const ctx = canvas.getContext("2d");
 const pdfWrap = document.getElementById("pdfWrap");
-const fieldList = document.getElementById("fieldList");
+const previewBox = document.getElementById("previewBox");
 const output = document.getElementById("output");
 
 let pdfPage = null;
 let scale = 1.5;
 let startX, startY, drawing = false;
 let fields = [];
-let fieldId = 1;
+let fieldCounter = 1;
 
 // 載入 PDF
 document.getElementById("pdfInput").addEventListener("change", async e => {
@@ -157,83 +148,71 @@ document.getElementById("pdfInput").addEventListener("change", async e => {
   await pdfPage.render({ canvasContext: ctx, viewport }).promise;
 });
 
-// 框選
+// 滑鼠按下
 pdfWrap.addEventListener("mousedown", e => {
-  drawing = true;
   const rect = pdfWrap.getBoundingClientRect();
   startX = e.clientX - rect.left;
   startY = e.clientY - rect.top;
+  drawing = true;
+
+  previewBox.style.display = "block";
+  previewBox.style.left = startX + "px";
+  previewBox.style.top = startY + "px";
+  previewBox.style.width = "0px";
+  previewBox.style.height = "0px";
 });
 
-pdfWrap.addEventListener("mouseup", e => {
+// 滑鼠移動（黃色預覽框）
+pdfWrap.addEventListener("mousemove", e => {
+  if (!drawing) return;
+  const rect = pdfWrap.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  previewBox.style.left = Math.min(startX, x) + "px";
+  previewBox.style.top = Math.min(startY, y) + "px";
+  previewBox.style.width = Math.abs(x - startX) + "px";
+  previewBox.style.height = Math.abs(y - startY) + "px";
+});
+
+// 滑鼠放開 → 正式建立框
+window.addEventListener("mouseup", () => {
   if (!drawing) return;
   drawing = false;
-  const rect = pdfWrap.getBoundingClientRect();
-  const endX = e.clientX - rect.left;
-  const endY = e.clientY - rect.top;
+  previewBox.style.display = "none";
 
-  const x = Math.min(startX, endX);
-  const y = Math.min(startY, endY);
-  const w = Math.abs(endX - startX);
-  const h = Math.abs(endY - startY);
+  const w = parseInt(previewBox.style.width);
+  const h = parseInt(previewBox.style.height);
+  if (w < 40 || h < 30) return;
 
-  if (w < 30 || h < 20) return;
-
-  const label = prompt("請輸入此簽署框用途說明（例：簽署人姓名）");
+  const label = prompt("請輸入此簽署框用途說明");
   if (!label) return;
 
-  const type = prompt("請輸入簽署類型：signature / checkbox / text", "signature");
+  const box = document.createElement("div");
+  box.className = "field-box";
+  box.style.left = previewBox.style.left;
+  box.style.top = previewBox.style.top;
+  box.style.width = previewBox.style.width;
+  box.style.height = previewBox.style.height;
 
-  const field = {
-    id: "field-" + fieldId++,
+  const tag = document.createElement("span");
+  tag.textContent = `#${fieldCounter}｜${label}`;
+  box.appendChild(tag);
+  pdfWrap.appendChild(box);
+
+  fields.push({
+    id: "field-" + fieldCounter,
+    order: fieldCounter,
     page: 1,
-    x: Math.round(x),
-    y: Math.round(y),
-    width: Math.round(w),
-    height: Math.round(h),
-    label,
-    type: type || "signature"
-  };
-
-  fields.push(field);
-  renderFields();
-});
-
-// 畫框
-function renderFields() {
-  document.querySelectorAll(".field-box").forEach(el => el.remove());
-  fieldList.innerHTML = "";
-
-  fields.forEach((f, i) => {
-    const box = document.createElement("div");
-    box.className = "field-box";
-    box.style.left = f.x + "px";
-    box.style.top = f.y + "px";
-    box.style.width = f.width + "px";
-    box.style.height = f.height + "px";
-
-    const tag = document.createElement("span");
-    tag.textContent = f.label;
-    box.appendChild(tag);
-
-    pdfWrap.appendChild(box);
-
-    const row = document.createElement("div");
-    row.className = "field-item";
-    row.innerHTML = `
-      <b>${f.id}</b>
-      [${f.type}] ${f.label}
-      <button class="danger" onclick="removeField(${i})">刪除</button>
-    `;
-    fieldList.appendChild(row);
+    x: parseInt(box.style.left),
+    y: parseInt(box.style.top),
+    width: parseInt(box.style.width),
+    height: parseInt(box.style.height),
+    label
   });
-}
 
-// 刪除
-function removeField(index) {
-  fields.splice(index, 1);
-  renderFields();
-}
+  fieldCounter++;
+});
 
 // 匯出
 document.getElementById("exportBtn").addEventListener("click", () => {
@@ -242,9 +221,9 @@ document.getElementById("exportBtn").addEventListener("click", () => {
 
 // 清除
 function clearAll() {
+  document.querySelectorAll(".field-box").forEach(el => el.remove());
   fields = [];
-  fieldId = 1;
-  renderFields();
+  fieldCounter = 1;
   output.textContent = "{ 尚未設定 }";
 }
 </script>
