@@ -2,7 +2,7 @@
 <html lang="zh-TW">
 <head>
 <meta charset="UTF-8" />
-<title>文件簽核位置設定</title>
+<title>文件簽署框設定（多框＋註解）</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
 <style>
@@ -15,21 +15,19 @@ body {
 }
 
 .card {
-  max-width: 1000px;
+  max-width: 1100px;
   margin: auto;
   background: #fff;
-  border-radius: 12px;
-  box-shadow: 0 6px 16px rgba(0,0,0,.08);
+  border-radius: 14px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.08);
   padding: 16px;
 }
 
-h2 {
-  margin-top: 0;
-}
+h2 { margin-top: 0; }
 
 #pdfWrap {
   position: relative;
-  border: 1px solid #ccc;
+  border: 1px solid #d1d5db;
   margin-top: 12px;
 }
 
@@ -37,23 +35,35 @@ h2 {
   width: 100%;
 }
 
-#selectBox {
+.field-box {
   position: absolute;
-  border: 2px dashed red;
-  background: rgba(255,0,0,0.1);
-  display: none;
+  border: 2px dashed #2563eb;
+  background: rgba(37,99,235,0.15);
+  cursor: pointer;
+}
+
+.field-box span {
+  position: absolute;
+  top: -20px;
+  left: 0;
+  background: #2563eb;
+  color: #fff;
+  font-size: 12px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  white-space: nowrap;
 }
 
 .toolbar {
-  margin: 10px 0;
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  margin: 10px 0;
 }
 
 button {
   padding: 8px 14px;
-  border-radius: 8px;
+  border-radius: 10px;
   border: none;
   background: #2563eb;
   color: #fff;
@@ -61,14 +71,30 @@ button {
   cursor: pointer;
 }
 
-button.secondary {
-  background: #6b7280;
+button.secondary { background: #6b7280; }
+button.danger { background: #dc2626; }
+
+input, select {
+  padding: 6px 8px;
+  font-size: 14px;
+}
+
+.field-list {
+  margin-top: 12px;
+}
+
+.field-item {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+  font-size: 13px;
 }
 
 pre {
   background: #f3f4f6;
-  padding: 10px;
-  border-radius: 8px;
+  padding: 12px;
+  border-radius: 10px;
   font-size: 13px;
   overflow-x: auto;
 }
@@ -78,27 +104,26 @@ pre {
 <body>
 
 <div class="card">
-  <h2>📄 文件簽核位置設定</h2>
+  <h2>📄 文件簽署框設定</h2>
 
   <input type="file" id="pdfInput" accept="application/pdf" />
 
   <div class="toolbar">
-    <button id="saveBtn">儲存簽名位置</button>
-    <button class="secondary" onclick="clearBox()">清除框選</button>
+    <button id="exportBtn">匯出簽署設定 JSON</button>
+    <button class="secondary" onclick="clearAll()">清除全部</button>
   </div>
 
   <div id="pdfWrap">
     <canvas id="pdfCanvas"></canvas>
-    <div id="selectBox"></div>
   </div>
 
-  <h3>📦 簽名座標輸出（JSON）</h3>
+  <div class="field-list" id="fieldList"></div>
+
+  <h3>📦 輸出結果</h3>
   <pre id="output">{ 尚未設定 }</pre>
 </div>
 
-<!-- PDF.js CDN -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc =
   "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
@@ -106,87 +131,120 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 const canvas = document.getElementById("pdfCanvas");
 const ctx = canvas.getContext("2d");
 const pdfWrap = document.getElementById("pdfWrap");
-const selectBox = document.getElementById("selectBox");
+const fieldList = document.getElementById("fieldList");
 const output = document.getElementById("output");
 
 let pdfPage = null;
 let scale = 1.5;
-let startX, startY;
-let isSelecting = false;
+let startX, startY, drawing = false;
+let fields = [];
+let fieldId = 1;
 
 // 載入 PDF
 document.getElementById("pdfInput").addEventListener("change", async e => {
   const file = e.target.files[0];
   if (!file) return;
-
   const data = await file.arrayBuffer();
   const pdf = await pdfjsLib.getDocument({ data }).promise;
-  pdfPage = await pdf.getPage(1); // 先只處理第一頁
+  pdfPage = await pdf.getPage(1);
 
   const viewport = pdfPage.getViewport({ scale });
   canvas.width = viewport.width;
   canvas.height = viewport.height;
-
   pdfWrap.style.width = viewport.width + "px";
   pdfWrap.style.height = viewport.height + "px";
 
   await pdfPage.render({ canvasContext: ctx, viewport }).promise;
 });
 
-// 滑鼠拖拉框選
+// 框選
 pdfWrap.addEventListener("mousedown", e => {
-  isSelecting = true;
+  drawing = true;
   const rect = pdfWrap.getBoundingClientRect();
   startX = e.clientX - rect.left;
   startY = e.clientY - rect.top;
-
-  selectBox.style.left = startX + "px";
-  selectBox.style.top = startY + "px";
-  selectBox.style.width = "0px";
-  selectBox.style.height = "0px";
-  selectBox.style.display = "block";
 });
 
-pdfWrap.addEventListener("mousemove", e => {
-  if (!isSelecting) return;
+pdfWrap.addEventListener("mouseup", e => {
+  if (!drawing) return;
+  drawing = false;
   const rect = pdfWrap.getBoundingClientRect();
-  const x = e.clientX - rect.left;
-  const y = e.clientY - rect.top;
+  const endX = e.clientX - rect.left;
+  const endY = e.clientY - rect.top;
 
-  selectBox.style.width = Math.abs(x - startX) + "px";
-  selectBox.style.height = Math.abs(y - startY) + "px";
-  selectBox.style.left = Math.min(x, startX) + "px";
-  selectBox.style.top = Math.min(y, startY) + "px";
-});
+  const x = Math.min(startX, endX);
+  const y = Math.min(startY, endY);
+  const w = Math.abs(endX - startX);
+  const h = Math.abs(endY - startY);
 
-window.addEventListener("mouseup", () => {
-  isSelecting = false;
-});
+  if (w < 30 || h < 20) return;
 
-// 儲存座標
-document.getElementById("saveBtn").addEventListener("click", () => {
-  if (selectBox.style.display !== "block") {
-    alert("請先框選簽名區域");
-    return;
-  }
+  const label = prompt("請輸入此簽署框用途說明（例：簽署人姓名）");
+  if (!label) return;
 
-  const box = selectBox.getBoundingClientRect();
-  const wrap = pdfWrap.getBoundingClientRect();
+  const type = prompt("請輸入簽署類型：signature / checkbox / text", "signature");
 
-  const result = {
+  const field = {
+    id: "field-" + fieldId++,
     page: 1,
-    x: Math.round(box.left - wrap.left),
-    y: Math.round(box.top - wrap.top),
-    width: Math.round(box.width),
-    height: Math.round(box.height)
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.round(w),
+    height: Math.round(h),
+    label,
+    type: type || "signature"
   };
 
-  output.textContent = JSON.stringify(result, null, 2);
+  fields.push(field);
+  renderFields();
+});
+
+// 畫框
+function renderFields() {
+  document.querySelectorAll(".field-box").forEach(el => el.remove());
+  fieldList.innerHTML = "";
+
+  fields.forEach((f, i) => {
+    const box = document.createElement("div");
+    box.className = "field-box";
+    box.style.left = f.x + "px";
+    box.style.top = f.y + "px";
+    box.style.width = f.width + "px";
+    box.style.height = f.height + "px";
+
+    const tag = document.createElement("span");
+    tag.textContent = f.label;
+    box.appendChild(tag);
+
+    pdfWrap.appendChild(box);
+
+    const row = document.createElement("div");
+    row.className = "field-item";
+    row.innerHTML = `
+      <b>${f.id}</b>
+      [${f.type}] ${f.label}
+      <button class="danger" onclick="removeField(${i})">刪除</button>
+    `;
+    fieldList.appendChild(row);
+  });
+}
+
+// 刪除
+function removeField(index) {
+  fields.splice(index, 1);
+  renderFields();
+}
+
+// 匯出
+document.getElementById("exportBtn").addEventListener("click", () => {
+  output.textContent = JSON.stringify(fields, null, 2);
 });
 
 // 清除
-function clearBox() {
-  selectBox.style.display = "none";
+function clearAll() {
+  fields = [];
+  fieldId = 1;
+  renderFields();
   output.textContent = "{ 尚未設定 }";
 }
 </script>
