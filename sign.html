@@ -1,3 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<title>文件簽署</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<style>
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+               "Noto Sans TC", Arial, sans-serif;
+  background: #f5f6f7;
+  padding: 16px;
+}
+
+.card {
+  max-width: 1100px;
+  margin: auto;
+  background: #fff;
+  border-radius: 14px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.08);
+  padding: 16px;
+}
+
+h2 { margin-top: 0; }
+
+#pdfWrap {
+  position: relative;
+  border: 1px solid #d1d5db;
+  margin-top: 12px;
+}
+
+#pdfCanvas {
+  width: 100%;
+}
+
+.sign-box {
+  position: absolute;
+  border: 2px dashed #16a34a;
+  background: rgba(22,163,74,0.15);
+  box-sizing: border-box;
+}
+
+.sign-box.disabled {
+  border-color: #9ca3af;
+  background: rgba(156,163,175,0.15);
+}
+
+.sign-box span {
+  position: absolute;
+  top: -22px;
+  left: 0;
+  background: #16a34a;
+  color: #fff;
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+canvas.sign-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+.checkbox-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  font-size: 18px;
+}
+
+.toolbar {
+  margin-top: 12px;
+}
+
+button {
+  padding: 10px 18px;
+  border-radius: 12px;
+  border: none;
+  background: #16a34a;
+  color: #fff;
+  font-size: 15px;
+  cursor: pointer;
+}
+</style>
+</head>
+
+<body>
+
+<div class="card">
+  <h2>✍️ 文件簽署</h2>
+
+  <input type="file" id="pdfInput" accept="application/pdf" />
+
+  <div id="pdfWrap">
+    <canvas id="pdfCanvas"></canvas>
+  </div>
+
+  <div class="toolbar">
+    <button id="exportBtn">完成簽署並匯出結果</button>
+  </div>
+
+  <pre id="output" style="margin-top:12px;">{ 尚未完成 }</pre>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+/* ====== 請貼上「框選頁匯出的 JSON」 ====== */
+const SIGN_FIELDS = [
+  {
+    "id": "field-1",
+    "order": 1,
+    "page": 1,
+    "x": 120,
+    "y": 500,
+    "width": 240,
+    "height": 80,
+    "label": "簽署人姓名",
+    "type": "signature"
+  },
+  {
+    "id": "field-2",
+    "order": 2,
+    "page": 1,
+    "x": 120,
+    "y": 620,
+    "width": 240,
+    "height": 50,
+    "label": "本人已詳閱並同意",
+    "type": "checkbox"
+  }
+];
+
+const canvas = document.getElementById("pdfCanvas");
+const ctx = canvas.getContext("2d");
+const pdfWrap = document.getElementById("pdfWrap");
+const output = document.getElementById("output");
+
+let pdfPage = null;
+let scale = 1.5;
+let results = {};
+
+// 載入 PDF
+document.getElementById("pdfInput").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const data = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  pdfPage = await pdf.getPage(1);
+
+  const viewport = pdfPage.getViewport({ scale });
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+  pdfWrap.style.width = viewport.width + "px";
+  pdfWrap.style.height = viewport.height + "px";
+
+  await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+  renderFields();
+});
+
+// 畫簽署框
+function renderFields() {
+  SIGN_FIELDS.forEach(field => {
+    const box = document.createElement("div");
+    box.className = "sign-box";
+    box.style.left = field.x + "px";
+    box.style.top = field.y + "px";
+    box.style.width = field.width + "px";
+    box.style.height = field.height + "px";
+
+    const tag = document.createElement("span");
+    tag.textContent = `#${field.order}｜${field.label}`;
+    box.appendChild(tag);
+
+    if (field.type === "signature") {
+      const c = document.createElement("canvas");
+      c.className = "sign-canvas";
+      box.appendChild(c);
+      enableDraw(c, field.id);
+    }
+
+    if (field.type === "checkbox") {
+      const w = document.createElement("div");
+      w.className = "checkbox-wrap";
+      const chk = document.createElement("input");
+      chk.type = "checkbox";
+      chk.onchange = () => {
+        results[field.id] = chk.checked;
+      };
+      w.appendChild(chk);
+      box.appendChild(w);
+    }
+
+    pdfWrap.appendChild(box);
+  });
+}
+
+// 手寫簽名
 function enableDraw(c, fieldId) {
   const ctx = c.getContext("2d");
   let drawing = false;
@@ -58,3 +263,13 @@ function enableDraw(c, fieldId) {
     }
   });
 }
+
+
+// 匯出結果
+document.getElementById("exportBtn").addEventListener("click", () => {
+  output.textContent = JSON.stringify(results, null, 2);
+});
+</script>
+
+</body>
+</html>
