@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8" />
+<title>文件簽核位置設定</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<style>
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+               "Noto Sans TC", Arial, sans-serif;
+  background: #f5f6f7;
+  padding: 16px;
+}
+
+.card {
+  max-width: 1000px;
+  margin: auto;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 6px 16px rgba(0,0,0,.08);
+  padding: 16px;
+}
+
+h2 {
+  margin-top: 0;
+}
+
+#pdfWrap {
+  position: relative;
+  border: 1px solid #ccc;
+  margin-top: 12px;
+}
+
+#pdfCanvas {
+  width: 100%;
+}
+
+#selectBox {
+  position: absolute;
+  border: 2px dashed red;
+  background: rgba(255,0,0,0.1);
+  display: none;
+}
+
+.toolbar {
+  margin: 10px 0;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+button {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: none;
+  background: #2563eb;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #6b7280;
+}
+
+pre {
+  background: #f3f4f6;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  overflow-x: auto;
+}
+</style>
+</head>
+
+<body>
+
+<div class="card">
+  <h2>📄 文件簽核位置設定</h2>
+
+  <input type="file" id="pdfInput" accept="application/pdf" />
+
+  <div class="toolbar">
+    <button id="saveBtn">儲存簽名位置</button>
+    <button class="secondary" onclick="clearBox()">清除框選</button>
+  </div>
+
+  <div id="pdfWrap">
+    <canvas id="pdfCanvas"></canvas>
+    <div id="selectBox"></div>
+  </div>
+
+  <h3>📦 簽名座標輸出（JSON）</h3>
+  <pre id="output">{ 尚未設定 }</pre>
+</div>
+
+<!-- PDF.js CDN -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc =
+  "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const canvas = document.getElementById("pdfCanvas");
+const ctx = canvas.getContext("2d");
+const pdfWrap = document.getElementById("pdfWrap");
+const selectBox = document.getElementById("selectBox");
+const output = document.getElementById("output");
+
+let pdfPage = null;
+let scale = 1.5;
+let startX, startY;
+let isSelecting = false;
+
+// 載入 PDF
+document.getElementById("pdfInput").addEventListener("change", async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+
+  const data = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data }).promise;
+  pdfPage = await pdf.getPage(1); // 先只處理第一頁
+
+  const viewport = pdfPage.getViewport({ scale });
+  canvas.width = viewport.width;
+  canvas.height = viewport.height;
+
+  pdfWrap.style.width = viewport.width + "px";
+  pdfWrap.style.height = viewport.height + "px";
+
+  await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+});
+
+// 滑鼠拖拉框選
+pdfWrap.addEventListener("mousedown", e => {
+  isSelecting = true;
+  const rect = pdfWrap.getBoundingClientRect();
+  startX = e.clientX - rect.left;
+  startY = e.clientY - rect.top;
+
+  selectBox.style.left = startX + "px";
+  selectBox.style.top = startY + "px";
+  selectBox.style.width = "0px";
+  selectBox.style.height = "0px";
+  selectBox.style.display = "block";
+});
+
+pdfWrap.addEventListener("mousemove", e => {
+  if (!isSelecting) return;
+  const rect = pdfWrap.getBoundingClientRect();
+  const x = e.clientX - rect.left;
+  const y = e.clientY - rect.top;
+
+  selectBox.style.width = Math.abs(x - startX) + "px";
+  selectBox.style.height = Math.abs(y - startY) + "px";
+  selectBox.style.left = Math.min(x, startX) + "px";
+  selectBox.style.top = Math.min(y, startY) + "px";
+});
+
+window.addEventListener("mouseup", () => {
+  isSelecting = false;
+});
+
+// 儲存座標
+document.getElementById("saveBtn").addEventListener("click", () => {
+  if (selectBox.style.display !== "block") {
+    alert("請先框選簽名區域");
+    return;
+  }
+
+  const box = selectBox.getBoundingClientRect();
+  const wrap = pdfWrap.getBoundingClientRect();
+
+  const result = {
+    page: 1,
+    x: Math.round(box.left - wrap.left),
+    y: Math.round(box.top - wrap.top),
+    width: Math.round(box.width),
+    height: Math.round(box.height)
+  };
+
+  output.textContent = JSON.stringify(result, null, 2);
+});
+
+// 清除
+function clearBox() {
+  selectBox.style.display = "none";
+  output.textContent = "{ 尚未設定 }";
+}
+</script>
+
+</body>
+</html>
